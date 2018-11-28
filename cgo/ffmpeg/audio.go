@@ -3,16 +3,8 @@ package ffmpeg
 /*
 #include "ffmpeg.h"
 int wrap_avcodec_decode_audio4(AVCodecContext *ctx, AVFrame *frame, void *data, int size, int *got) {
-    int ret;
-    ret = avcodec_receive_frame(ctx,frame);
-    if (ret == 0)
-        got_frame = true;
-    if (ret == AVERROR(EAGAIN))
-        ret = 0;
-    if (ret == 0)
-        ret = avcodec_send_packet(ctx, pkt);
-    if (ret == AVERROR(EAGAIN))
-        ret = 0;
+	struct AVPacket pkt = {.data = data, .size = size};
+	return avcodec_decode_audio4(ctx, frame, got, &pkt);
 }
 int wrap_avresample_convert(AVAudioResampleContext *avr, int *out, int outsize, int outcount, int *in, int insize, int incount) {
     return avresample_convert(avr, (void *)out, outsize, outcount, (void *)in, insize, incount);
