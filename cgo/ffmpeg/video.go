@@ -24,7 +24,8 @@ type VideoEncoder struct {
 }
 
 func (self *VideoEncoder) Encode(images []VideoFrame, fileOut string, width int, height int) (err error) {
-    fmt.Println("Joy4 Encode Video")
+    fmt.Printf("**** Encode Video: %d frames, writing to file %s, width %d, height %d\n", len(images), fileOut, width, height)
+    return
 
     C.av_register_all();
     format_type := "mp4"
@@ -53,7 +54,7 @@ func (self *VideoEncoder) Encode(images []VideoFrame, fileOut string, width int,
     tb.den = 25
     c.time_base = tb
 
-        // Setting up the format, its stream(s),
+    // Setting up the format, its stream(s),
     // linking with the codec(s) and write the header.
     if (fc.oformat.flags & C.AVFMT_GLOBALHEADER != 0) {
         // Some formats require a global header.
@@ -98,8 +99,30 @@ func (self *VideoEncoder) Encode(images []VideoFrame, fileOut string, width int,
     var got_output C.int
     var iframe C.int
 
+	// Preparing to convert my generated RGB images to YUV frames.
+    swsCtx := C.sws_getContext(C.int(width), C.int(height), C.AV_PIX_FMT_RGB24, C.int(width), C.int(height),
+        C.AV_PIX_FMT_YUV420P, C.SWS_FAST_BILINEAR, nil, nil, nil)
+
     for i, img := range images {
+        rgb_pixels := img.RGBA.Pix
+
         // adding frame
+        total_bytes := width * height
+        data := C.GoBytes(unsafe.Pointer(rgbpic.data[0]), C.int(total_bytes))
+        for y := 0; y <= height; y++ {
+            for x := 0; x <= width; x++ {
+                go_linesize := int(rgbpic.linesize[0])
+                // rgbpic->linesize[0] is equal to width.
+                data[y * go_linesize + 3 * x + 0] = rgb_pixels[y * 4 * width + 4 * x + 2]
+                data[y * go_linesize + 3 * x + 1] = rgb_pixels[y * 4 * width + 4 * x + 1]
+                data[y * go_linesize + 3 * x + 2] = rgb_pixels[y * 4 * width + 4 * x + 0]
+            }
+        }
+
+        // Not actually scaling anything, but just converting
+        // the RGB data to YUV and store it in yuvpic.
+        C.sws_scale(swsCtx, (**C.uchar)(unsafe.Pointer(&rgbpic.data)), (*C.int)(unsafe.Pointer(&rgbpic.linesize)), 0, C.int(height),
+            (**C.uchar)(unsafe.Pointer(&yuvpic.data)), (*C.int)(unsafe.Pointer(&yuvpic.linesize)))
 
         C.av_init_packet(&pkt)
         pkt.data = nil
@@ -154,9 +177,6 @@ func (self *VideoEncoder) Encode(images []VideoFrame, fileOut string, width int,
 	C.av_frame_free(&rgbpic)
 	C.av_frame_free(&yuvpic)
 	C.avformat_free_context(fc)
-    //for i, img := range images {
-    //    fmt.Printf("Frame %d, seq num %d\n", i, img.frame.coded_picture_number)
-    //}
 
     return
 }
@@ -189,6 +209,7 @@ func fromCPtr(buf unsafe.Pointer, size int) (ret []uint8) {
 
 type VideoFrame struct {
     Image image.YCbCr
+    RGBA *image.RGBA
     frame *C.AVFrame
 }
 
