@@ -23,9 +23,8 @@ type VideoEncoder struct {
     Extradata []byte
 }
 
-func (self *VideoEncoder) Encode(images []VideoFrame, fileOut string, width int, height int) (err error) {
+func (self *VideoEncoder) Encode(images []*image.RGBA, fileOut string, width int, height int) (err error) {
     fmt.Printf("**** Encode Video: %d frames, writing to file %s, width %d, height %d\n", len(images), fileOut, width, height)
-    return
 
     C.av_register_all();
     format_type := "mp4"
@@ -38,7 +37,7 @@ func (self *VideoEncoder) Encode(images []VideoFrame, fileOut string, width int,
     C.avformat_alloc_output_context2(&fc, nil, nil, c_fileOut)
     encoder_name := "libx264"
     c_encoder_name := C.CString(encoder_name)
-    defer C.free(unsafe.Pointer(c_fileOut))
+    defer C.free(unsafe.Pointer(c_encoder_name))
     codec := C.avcodec_find_encoder_by_name(c_encoder_name)
     var opt *C.AVDictionary
 
@@ -77,7 +76,7 @@ func (self *VideoEncoder) Encode(images []VideoFrame, fileOut string, width int,
     // Preparing the containers of the frame data:
     // Allocating memory for each RGB frame, which will be lately converted to YUV.
     rgbpic := C.av_frame_alloc()
-    rgbpic.format = C.AV_PIX_FMT_RGB24
+    rgbpic.format = C.AV_PIX_FMT_RGBA
     rgbpic.width = C.int(width)
     rgbpic.height = C.int(height)
     ret = C.av_frame_get_buffer(rgbpic, 1)
@@ -99,30 +98,52 @@ func (self *VideoEncoder) Encode(images []VideoFrame, fileOut string, width int,
     var got_output C.int
     var iframe C.int
 
-	// Preparing to convert my generated RGB images to YUV frames.
-    swsCtx := C.sws_getContext(C.int(width), C.int(height), C.AV_PIX_FMT_RGB24, C.int(width), C.int(height),
+    // Preparing to convert my generated RGB images to YUV frames.
+    swsCtx := C.sws_getContext(C.int(width), C.int(height), C.AV_PIX_FMT_RGBA, C.int(width), C.int(height),
         C.AV_PIX_FMT_YUV420P, C.SWS_FAST_BILINEAR, nil, nil, nil)
 
-    for i, img := range images {
-        rgb_pixels := img.RGBA.Pix
+    for _, img := range images {
+        /*
+            rgb_pixels := img.Pix
+            // should be 4 for rgba
+            pix_stride := img.Stride
 
-        // adding frame
-        total_bytes := width * height
-        data := C.GoBytes(unsafe.Pointer(rgbpic.data[0]), C.int(total_bytes))
-        for y := 0; y <= height; y++ {
-            for x := 0; x <= width; x++ {
-                go_linesize := int(rgbpic.linesize[0])
-                // rgbpic->linesize[0] is equal to width.
-                data[y * go_linesize + 3 * x + 0] = rgb_pixels[y * 4 * width + 4 * x + 2]
-                data[y * go_linesize + 3 * x + 1] = rgb_pixels[y * 4 * width + 4 * x + 1]
-                data[y * go_linesize + 3 * x + 2] = rgb_pixels[y * 4 * width + 4 * x + 0]
+            // adding frame
+            total_bytes := len(rgb_pixels)
+            data := C.GoBytes(unsafe.Pointer(rgbpic.data[0]), C.int(total_bytes))
+            for y := 0; y < height; y++ {
+                for x := 0; x < width; x++ {
+                    go_linesize := int(rgbpic.linesize[0])
+                    // rgbpic->linesize[0] is equal to width.
+                    data[y * go_linesize + pix_stride * x + 0] = rgb_pixels[y * 4 * width + 4 * x + 3]
+                    data[y * go_linesize + pix_stride * x + 1] = rgb_pixels[y * 4 * width + 4 * x + 2]
+                    data[y * go_linesize + pix_stride * x + 2] = rgb_pixels[y * 4 * width + 4 * x + 1]
+                    data[y * go_linesize + pix_stride * x + 3] = rgb_pixels[y * 4 * width + 4 * x + 0]
+                }
             }
+     */
+        //C.avio_flush(&fc.pb)
+        c_data := rgbpic.data[0]
+        byte_count := width * height * 4
+        var go_data []byte
+        sliceHeader := (*reflect.SliceHeader)((unsafe.Pointer(&go_data)))
+        sliceHeader.Cap = byte_count
+        sliceHeader.Len = byte_count
+        sliceHeader.Data = uintptr(unsafe.Pointer(c_data))
+        //
+        // now theGoSlice is a normal Go slice backed by the C array
+
+
+        //data := C.GoBytes(unsafe.Pointer(rgbpic.data[0]), C.int(byte_count))
+        for i := 0; i < byte_count; i++ {
+            go_data[i] = img.Pix[i]
         }
 
         // Not actually scaling anything, but just converting
         // the RGB data to YUV and store it in yuvpic.
         C.sws_scale(swsCtx, (**C.uchar)(unsafe.Pointer(&rgbpic.data)), (*C.int)(unsafe.Pointer(&rgbpic.linesize)), 0, C.int(height),
             (**C.uchar)(unsafe.Pointer(&yuvpic.data)), (*C.int)(unsafe.Pointer(&yuvpic.linesize)))
+
 
         C.av_init_packet(&pkt)
         pkt.data = nil
@@ -134,6 +155,11 @@ func (self *VideoEncoder) Encode(images []VideoFrame, fileOut string, width int,
         yuvpic.pts = C.long(iframe)
 
         ret = C.avcodec_encode_video2(c, &pkt, yuvpic, &got_output)
+        if (ret != 0) {
+            fmt.Println("Error encoding frame into packet: %d", ret)
+            continue
+        }
+        // what are we counting here
         if (got_output != 0) {
             // We set the packet PTS and DTS taking in the account our FPS (second argument),
             // and the time base that our selected format uses (third argument).
@@ -141,42 +167,44 @@ func (self *VideoEncoder) Encode(images []VideoFrame, fileOut string, width int,
 
             pkt.stream_index = stream.index
             fmt.Printf("Writing frame %d (size = %d)\n", iframe, pkt.size)
-            fmt.Printf("Frame %d, seq num %d\n", i, img.frame.coded_picture_number)
-            iframe += 1
+            //fmt.Printf("Frame %d, seq num %d\n", i, img.frame.coded_picture_number)
+            //iframe += 1
 
             // Write the encoded frame to the mp4 file.
             C.av_interleaved_write_frame(fc, &pkt)
             C.av_packet_unref(&pkt)
+            iframe += 1
         }
     }
 
     // flush file
-	// Writing the delayed frames:
-	for true {
-		ret = C.avcodec_encode_video2(c, &pkt, nil, &got_output)
-		if got_output == 1 {
-			C.av_packet_rescale_ts(&pkt, tb, stream.time_base)
-			pkt.stream_index = stream.index
-            fmt.Printf("Writing frame %d (size = %d)\n", iframe, pkt.size)
+    // Writing the delayed frames:
+    for true {
+        //C.avio_flush(&fc.pb)
+        ret = C.avcodec_encode_video2(c, &pkt, nil, &got_output)
+        if got_output == 1 {
+            C.av_packet_rescale_ts(&pkt, tb, stream.time_base)
+            pkt.stream_index = stream.index
+            fmt.Printf("Writing delayed frame %d (size = %d)\n", iframe, pkt.size)
             iframe += 1
-			C.av_interleaved_write_frame(fc, &pkt)
+            C.av_interleaved_write_frame(fc, &pkt)
             C.av_packet_unref(&pkt)
         }else{break}
-	}
+    }
 
-	// Writing the end of the file.
-	C.av_write_trailer(fc)
+    // Writing the end of the file.
+    C.av_write_trailer(fc)
 
-	// Closing the file.
-	if (mpeg_fmt.flags & C.AVFMT_NOFILE == 0) {
+    // Closing the file.
+    if (mpeg_fmt.flags & C.AVFMT_NOFILE == 0) {
         C.avio_closep(&fc.pb)
     }
-	C.avcodec_close(stream.codec)
+    C.avcodec_close(stream.codec)
 
-	// Freeing all the allocated memory:
-	C.av_frame_free(&rgbpic)
-	C.av_frame_free(&yuvpic)
-	C.avformat_free_context(fc)
+    // Freeing all the allocated memory:
+    C.av_frame_free(&rgbpic)
+    C.av_frame_free(&yuvpic)
+    C.avformat_free_context(fc)
 
     return
 }
