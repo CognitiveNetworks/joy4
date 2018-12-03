@@ -124,20 +124,32 @@ func (self *VideoEncoder) Encode(images []*image.RGBA, fileOut string, width int
      */
         //C.avio_flush(&fc.pb)
         c_data := rgbpic.data[0]
-        byte_count := width * height * 4
+        //byte_count := width * height * 4
+		var byte_count int
+		byte_count = int(rgbpic.linesize[0] * rgbpic.height)
         var go_data []byte
         sliceHeader := (*reflect.SliceHeader)((unsafe.Pointer(&go_data)))
         sliceHeader.Cap = byte_count
         sliceHeader.Len = byte_count
         sliceHeader.Data = uintptr(unsafe.Pointer(c_data))
-        //
-        // now theGoSlice is a normal Go slice backed by the C array
-
 
         //data := C.GoBytes(unsafe.Pointer(rgbpic.data[0]), C.int(byte_count))
-        for i := 0; i < byte_count; i++ {
-            go_data[i] = img.Pix[i]
-        }
+		go_linesize := int(rgbpic.linesize[0])
+		for y := 0; y < height; y++ {
+			for x := 0; x < width; x++ {
+				// R
+				go_data[y * go_linesize + 4 * x + 0] = img.Pix[(y-img.Rect.Min.Y)*img.Stride + (x-img.Rect.Min.X)*4 + 0]
+				// G
+				go_data[y * go_linesize + 4 * x + 1] = img.Pix[(y-img.Rect.Min.Y)*img.Stride + (x-img.Rect.Min.X)*4 + 1]
+				// B
+				go_data[y * go_linesize + 4 * x + 2] = img.Pix[(y-img.Rect.Min.Y)*img.Stride + (x-img.Rect.Min.X)*4 + 2]
+				// A
+				go_data[y * go_linesize + 4 * x + 3] = img.Pix[(y-img.Rect.Min.Y)*img.Stride + (x-img.Rect.Min.X)*4 + 3]
+			}
+		}
+		//for i := 0; i < byte_count; i++ {
+        //    go_data[i] = img.Pix[(y-Rect.Min.Y)*Stride + (x-Rect.Min.X)*4]
+        //}
 
         // Not actually scaling anything, but just converting
         // the RGB data to YUV and store it in yuvpic.
@@ -155,10 +167,12 @@ func (self *VideoEncoder) Encode(images []*image.RGBA, fileOut string, width int
         yuvpic.pts = C.long(iframe)
 
         ret = C.avcodec_encode_video2(c, &pkt, yuvpic, &got_output)
+
         if (ret != 0) {
             fmt.Println("Error encoding frame into packet: %d", ret)
             continue
         }
+		iframe += 1
         // what are we counting here
         if (got_output != 0) {
             // We set the packet PTS and DTS taking in the account our FPS (second argument),
@@ -168,12 +182,11 @@ func (self *VideoEncoder) Encode(images []*image.RGBA, fileOut string, width int
             pkt.stream_index = stream.index
             fmt.Printf("Writing frame %d (size = %d)\n", iframe, pkt.size)
             //fmt.Printf("Frame %d, seq num %d\n", i, img.frame.coded_picture_number)
-            //iframe += 1
 
             // Write the encoded frame to the mp4 file.
             C.av_interleaved_write_frame(fc, &pkt)
+            //C.av_write_frame(fc, &pkt)
             C.av_packet_unref(&pkt)
-            iframe += 1
         }
     }
 
@@ -186,7 +199,7 @@ func (self *VideoEncoder) Encode(images []*image.RGBA, fileOut string, width int
             C.av_packet_rescale_ts(&pkt, tb, stream.time_base)
             pkt.stream_index = stream.index
             fmt.Printf("Writing delayed frame %d (size = %d)\n", iframe, pkt.size)
-            iframe += 1
+            //iframe += 1
             C.av_interleaved_write_frame(fc, &pkt)
             C.av_packet_unref(&pkt)
         }else{break}
