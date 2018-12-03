@@ -26,7 +26,10 @@ type VideoEncoder struct {
 func (self *VideoEncoder) Encode(images []*image.RGBA, fileOut string, width int, height int) (err error) {
     fmt.Printf("**** Encode Video: %d frames, writing to file %s, width %d, height %d\n", len(images), fileOut, width, height)
 
-    C.av_register_all();
+	height = 1080
+	width = 1920
+
+	C.av_register_all();
     format_type := "mp4"
     c_format_type := C.CString(format_type)
     defer C.free(unsafe.Pointer(c_format_type))
@@ -35,7 +38,7 @@ func (self *VideoEncoder) Encode(images []*image.RGBA, fileOut string, width int
     mpeg_fmt := C.av_guess_format(c_format_type, nil, nil)
     var fc *C.AVFormatContext
     C.avformat_alloc_output_context2(&fc, nil, nil, c_fileOut)
-    encoder_name := "libx264"
+	encoder_name := "libx264"
     c_encoder_name := C.CString(encoder_name)
     defer C.free(unsafe.Pointer(c_encoder_name))
     codec := C.avcodec_find_encoder_by_name(c_encoder_name)
@@ -50,7 +53,7 @@ func (self *VideoEncoder) Encode(images []*image.RGBA, fileOut string, width int
     c.pix_fmt = C.AV_PIX_FMT_YUV420P
     var tb C.AVRational
     tb.num = 1
-    tb.den = 25
+    tb.den = 30
     c.time_base = tb
 
     // Setting up the format, its stream(s),
@@ -132,9 +135,9 @@ func (self *VideoEncoder) Encode(images []*image.RGBA, fileOut string, width int
         sliceHeader.Cap = byte_count
         sliceHeader.Len = byte_count
         sliceHeader.Data = uintptr(unsafe.Pointer(c_data))
-
         //data := C.GoBytes(unsafe.Pointer(rgbpic.data[0]), C.int(byte_count))
 		go_linesize := int(rgbpic.linesize[0])
+		fmt.Printf("Linesize: %d, img.Stride: %d, img.Rect.Min.Y: %d, img.Rect.Min.X: %d\n", go_linesize, img.Stride, img.Rect.Min.Y, img.Rect.Min.X)
 		for y := 0; y < height; y++ {
 			for x := 0; x < width; x++ {
 				// R
@@ -148,7 +151,7 @@ func (self *VideoEncoder) Encode(images []*image.RGBA, fileOut string, width int
 			}
 		}
 		//for i := 0; i < byte_count; i++ {
-        //    go_data[i] = img.Pix[(y-Rect.Min.Y)*Stride + (x-Rect.Min.X)*4]
+        //    go_data[i] = img.Pix[i]
         //}
 
         // Not actually scaling anything, but just converting
