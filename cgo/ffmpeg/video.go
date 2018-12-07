@@ -15,7 +15,11 @@ import (
     "image"
     "reflect"
     "github.com/nareix/joy4/av"
-    "github.com/nareix/joy4/codec/h264parser"
+	"github.com/nareix/joy4/codec/h264parser"
+    "golang.org/x/image/font"
+    "golang.org/x/image/font/basicfont"
+    "golang.org/x/image/math/fixed"
+    "image/color"
 )
 
 type VideoEncoder struct {
@@ -45,7 +49,7 @@ func (self *VideoEncoder) Encode(images []*image.RGBA, fileOut string, width int
     var opt *C.AVDictionary
 
     C.av_dict_set(&opt, C.CString("preset"), C.CString("slow"), 0)
-    C.av_dict_set(&opt, C.CString("crf"), C.CString("20"), 0)
+    C.av_dict_set(&opt, C.CString("crf"), C.CString("25"), 0)
     stream := C.avformat_new_stream(fc, codec)
     c := stream.codec
     c.width = C.int(width)
@@ -124,7 +128,20 @@ func (self *VideoEncoder) Encode(images []*image.RGBA, fileOut string, width int
                     data[y * go_linesize + pix_stride * x + 3] = rgb_pixels[y * 4 * width + 4 * x + 0]
                 }
             }
-     */
+	 */
+		 col := color.RGBA{255, 0, 0, 255}
+		 point := fixed.Point26_6{fixed.Int26_6(100 * 64), fixed.Int26_6(100 * 64)}
+
+		 d := &font.Drawer{
+			 Dst:  img,
+			 Src:  image.NewUniform(col),
+			 Face: basicfont.Face7x13,
+			 Dot:  point,
+		 }
+		 s := fmt.Sprintf("DAI Diagnostics: %d x %d", width, height)
+		 d.DrawString(s)
+		 s = fmt.Sprintf(" Frame %d", iframe)
+		 d.DrawString(s)
         //C.avio_flush(&fc.pb)
         c_data := rgbpic.data[0]
         //byte_count := width * height * 4
@@ -202,7 +219,7 @@ func (self *VideoEncoder) Encode(images []*image.RGBA, fileOut string, width int
             C.av_packet_rescale_ts(&pkt, tb, stream.time_base)
             pkt.stream_index = stream.index
             fmt.Printf("Writing delayed frame %d (size = %d)\n", iframe, pkt.size)
-            //iframe += 1
+            iframe += 1
             C.av_interleaved_write_frame(fc, &pkt)
             C.av_packet_unref(&pkt)
         }else{break}
