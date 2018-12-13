@@ -25,6 +25,7 @@ import (
 type VideoEncoder struct {
     ff *ffctx
     Extradata []byte
+    Crf string
 }
 
 func (self *VideoEncoder) Encode(images []*image.RGBA, fileOut string, width int, height int) (err error) {
@@ -32,6 +33,10 @@ func (self *VideoEncoder) Encode(images []*image.RGBA, fileOut string, width int
 
 	height = 1080
 	width = 1920
+
+    if len(self.Crf) == 0 {
+        self.Crf = "25"
+    }
 
 	C.av_register_all();
     format_type := "mp4"
@@ -49,7 +54,7 @@ func (self *VideoEncoder) Encode(images []*image.RGBA, fileOut string, width int
     var opt *C.AVDictionary
 
     C.av_dict_set(&opt, C.CString("preset"), C.CString("slow"), 0)
-    C.av_dict_set(&opt, C.CString("crf"), C.CString("25"), 0)
+    C.av_dict_set(&opt, C.CString("crf"), C.CString(self.Crf), 0)
     stream := C.avformat_new_stream(fc, codec)
     c := stream.codec
     c.width = C.int(width)
